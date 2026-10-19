@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+db.sqlite3
+staticfiles/
+.env
+backups/
+# The Android signing key: NEVER put it in git. Keep a backup somewhere safe.
+android-signing/
+*.jks
+*.keystore
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

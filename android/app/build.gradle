@@ -1,0 +1,64 @@
+// Murimi Farm ERP for Android: a Trusted Web Activity (TWA).
+// The app opens the live Murimi website full-screen inside Chrome, so it works offline the same way
+// the website does, and every website update reaches the app with no reinstall.
+//
+// Built by GitHub (see .github/workflows/android.yml). Settings come from the environment:
+//   APP_HOST            the website address without https://, e.g. promisetatenda.pythonanywhere.com
+//   KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD   the signing key (GitHub secrets)
+plugins {
+    id "com.android.application"
+}
+
+def appHost = System.getenv("APP_HOST") ?: "example.pythonanywhere.com"
+def launchUrl = "https://" + appHost + "/?source=apk"
+def runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+
+android {
+    namespace "zw.murimi.erp"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "zw.murimi.erp"
+        minSdk 21
+        targetSdk 34
+        versionCode runNumber
+        versionName "1.0." + runNumber
+
+        manifestPlaceholders = [hostName: appHost]
+        resValue "string", "launchUrl", launchUrl
+        resValue "string", "providerAuthority", "zw.murimi.erp.fileprovider"
+        resValue "string", "assetStatements",
+            '[{ "relation": ["delegate_permission/common.handle_all_urls"], "target": {"namespace": "web", "site": "https://' + appHost + '"}}]'
+    }
+
+    signingConfigs {
+        release {
+            if (System.getenv("KEYSTORE_FILE")) {
+                storeFile file(System.getenv("KEYSTORE_FILE"))
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    buildFeatures {
+        resValues true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation "com.google.androidbrowserhelper:androidbrowserhelper:2.5.0"
+}

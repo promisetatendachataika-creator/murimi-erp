@@ -1,0 +1,17 @@
+{
+  "name": "Murimi Farm ERP",
+  "short_name": "Murimi ERP",
+  "description": "Farm records that work with no network: work, stock, fuel, harvests, pay and sales.",
+  "id": "/",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f3ec",
+  "theme_color": "#3f7d20",
+  "icons": [
+    {"src": "/static/web/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/web/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "/static/web/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
