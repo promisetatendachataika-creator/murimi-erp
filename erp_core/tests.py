@@ -157,3 +157,33 @@ class CropPlanTests(Base):
         r = self.api.delete(self.base + f"seasons/{season}/")
         self.assertEqual(r.status_code, 200)  # deleting a season removes its plans
         self.assertEqual(CropPlan.objects.count(), 0)
+
+
+class OwnerResetTests(Base):
+    def test_owner_resets_worker_who_must_then_change_it(self):
+        from accounts.models import User
+        sup = make_user("0771000002", "Sipho Supervisor")
+        mid = self.api.post(self.base + "members/", {"login": "0771000002", "role": "supervisor"}).json()["id"]
+        r = self.api.post(self.base + f"members/{mid}/reset-password/", {})
+        self.assertEqual(r.status_code, 200, r.content)
+        temp = r.json()["temporary_password"]
+        sup.refresh_from_db()
+        self.assertTrue(sup.check_password(temp))
+        self.assertTrue(sup.must_change_password)
+        c = ApiClient(sup, password=temp)
+        self.assertTrue(c.get("/api/auth/me/").json()["user"]["must_change_password"])
+        c.patch("/api/auth/me/", {"full_name": "Sipho Supervisor", "password": "my-own-secret-77"})
+        sup.refresh_from_db()
+        self.assertFalse(sup.must_change_password)
+        # Only owners may reset, never themselves or other owners.
+        self.assertEqual(c.post(self.base + f"members/{mid}/reset-password/", {}).status_code, 403)
+        me = Membership.objects.get(user=self.owner)
+        self.assertEqual(self.api.post(self.base + f"members/{me.id}/reset-password/", {}).status_code, 409)
+
+    def test_cannot_reset_someone_who_belongs_to_another_business(self):
+        other = make_user("0771000003", "Shared Accountant")
+        mid = self.api.post(self.base + "members/", {"login": "0771000003", "role": "accountant"}).json()["id"]
+        o2 = ApiClient(other)
+        o2.post("/api/erp/orgs/", {"name": "Another Farm", "province": "Mashonaland East", "district": "Marondera"})
+        r = self.api.post(self.base + f"members/{mid}/reset-password/", {})
+        self.assertEqual(r.status_code, 409)

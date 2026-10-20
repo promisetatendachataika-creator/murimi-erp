@@ -133,6 +133,15 @@ SESSION_COOKIE_AGE = 60 * 60 * 24 * 30
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 
+# 6-digit codes for "Forgot password?" (see accounts/sender.py). "console" = WhatsApp not switched on yet:
+# on the live site people are told to ask their farm owner; on your laptop (DEBUG) the code is shown on screen.
+MURIMI_CODE_SENDER = env("MURIMI_CODE_SENDER", "console")
+WHATSAPP_TOKEN = env("WHATSAPP_TOKEN", "")
+WHATSAPP_PHONE_NUMBER_ID = env("WHATSAPP_PHONE_NUMBER_ID", "")
+WHATSAPP_TEMPLATE = env("WHATSAPP_TEMPLATE", "murimi_code")
+WHATSAPP_TEMPLATE_LANG = env("WHATSAPP_TEMPLATE_LANG", "en")
+WHATSAPP_API_VERSION = env("WHATSAPP_API_VERSION", "v21.0")
+
 # Exchange rates fetched online (see erp_finance/fetch.py).
 MURIMI_RATES_AUTO = env_bool("MURIMI_RATES_AUTO", True)
 MURIMI_RATES_URL = env("MURIMI_RATES_URL", "")
@@ -160,7 +169,7 @@ USE_I18N = True
 USE_TZ = True
 
 # Bump this whenever app.js / app.css change, so browsers and installed phone apps fetch the new files.
-MURIMI_ASSET_VERSION = "8"
+MURIMI_ASSET_VERSION = "9"
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"

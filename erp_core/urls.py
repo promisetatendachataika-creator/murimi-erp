@@ -10,6 +10,7 @@ urlpatterns = [
     path(O + "summary/", api.summary),
     path(O + "members/", api.members),
     path(O + "members/<str:pk>/", api.member),
+    path(O + "members/<str:pk>/reset-password/", api.member_reset_password),
     path(O + "farms/", api.farms_res.collection_view()),
     path(O + "farms/<str:pk>/", api.farms_res.item_view()),
     path(O + "fields/", api.fields_res.collection_view()),

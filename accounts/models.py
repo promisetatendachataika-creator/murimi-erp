@@ -41,6 +41,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     role = models.CharField(max_length=20, blank=True)
     whatsapp_consent = models.BooleanField(default=False)
     phone_verified_at = models.DateTimeField("WhatsApp number confirmed", null=True, blank=True)
+    must_change_password = models.BooleanField(default=False, help_text="Set after an owner resets the password.")
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False, help_text="Can log in to the Murimi staff admin.")
@@ -78,3 +79,30 @@ class User(AbstractBaseUser, PermissionsMixin):
             pass
         self.username = (self.username or "").strip().lower() or None
         super().save(*args, **kwargs)
+
+
+class PhoneCode(models.Model):
+    """
+    A 6-digit code sent to someone's WhatsApp, to confirm their number or reset
+    their password. Only a fingerprint (hash) of the code is stored, never the code.
+    Same table as Murimi Intelligent Hub, so the two join up cleanly.
+    """
+
+    PURPOSE_VERIFY = "verify"
+    PURPOSE_RESET = "reset"
+    PURPOSE_CHOICES = [(PURPOSE_VERIFY, "Confirm WhatsApp number"), (PURPOSE_RESET, "Reset password")]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="phone_codes")
+    phone = models.CharField("Sent to", max_length=20)
+    purpose = models.CharField(max_length=10, choices=PURPOSE_CHOICES)
+    code_hash = models.CharField(max_length=128, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField("Wrong tries", default=0)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.get_purpose_display()} code for {self.phone}"

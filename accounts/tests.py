@@ -35,3 +35,41 @@ class AccountTests(TestCase):
             api.post("/api/auth/login/", {"login": "0772222222", "password": "wrong-password"})
         r = api.post("/api/auth/login/", {"login": "0772222222", "password": "harvest-time-2026"})
         self.assertEqual(r.status_code, 429)
+
+
+class PasswordResetTests(TestCase):
+    def setUp(self):
+        self.u = make_user("0772000001", "Rudo Chari")
+
+    def test_live_site_without_whatsapp_never_shows_codes(self):
+        from django.test import override_settings
+        with override_settings(DEBUG=False, MURIMI_CODE_SENDER="console"):
+            r = self.client.post("/api/auth/password/forgot/", {"login": "0772000001"}, content_type="application/json")
+        data = r.json()
+        self.assertTrue(data["whatsapp_off"])
+        self.assertNotIn("test_code", data)
+        self.assertIn("owner", data["message"])
+
+    def test_code_resets_password_and_logs_in(self):
+        from django.test import override_settings
+        with override_settings(DEBUG=True, MURIMI_CODE_SENDER="console"):
+            code = self.client.post("/api/auth/password/forgot/", {"login": "0772000001"},
+                                    content_type="application/json").json()["test_code"]
+        bad = self.client.post("/api/auth/password/reset/", {"login": "0772000001", "code": "000000",
+                               "password": "green-mealies-2027"}, content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+        r = self.client.post("/api/auth/password/reset/", {"login": "0772000001", "code": code,
+                             "password": "green-mealies-2027"}, content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.u.refresh_from_db()
+        self.assertTrue(self.u.check_password("green-mealies-2027"))
+        again = self.client.post("/api/auth/password/reset/", {"login": "0772000001", "code": code,
+                                 "password": "another-pass-2027"}, content_type="application/json")
+        self.assertEqual(again.status_code, 400)  # a code works once
+
+    def test_unknown_account_gets_same_answer(self):
+        from django.test import override_settings
+        with override_settings(DEBUG=True, MURIMI_CODE_SENDER="console"):
+            r = self.client.post("/api/auth/password/forgot/", {"login": "0779999999"}, content_type="application/json")
+        self.assertTrue(r.json()["sent"])
+        self.assertNotIn("test_code", r.json())

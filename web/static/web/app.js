@@ -310,8 +310,10 @@ function renderAuth(mode = 'login') {
       <h2>${mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
       <form class="grid" novalidate><p class="form-error f wide" hidden style="grid-column:1/-1"></p>${fields.map((f) => fieldHTML(f, '')).join('')}
         <div class="actions"><button class="btn primary" type="submit" style="width:100%;justify-content:center">${mode === 'login' ? 'Log in' : 'Create account'}</button></div></form>
+      ${mode === 'login' ? '<p class="center small"><a href="#" id="forgot">Forgot password?</a></p>' : ''}
     </div></section></div>`;
   document.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => renderAuth(b.dataset.mode));
+  if ($('#forgot')) $('#forgot').onclick = (e) => { e.preventDefault(); renderForgot(($('[name=login]') || {}).value || ''); };
   const form = $('.auth form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -322,6 +324,86 @@ function renderAuth(mode = 'login') {
       await loadOrgs();
       window.addEventListener('hashchange', route);
       location.hash = '#/home'; route();
+    } catch (ex) { showErrors(form, ex); } finally { btn.disabled = false; }
+  });
+  $('input', form).focus();
+}
+
+/* ---------------- forgot password, and choosing a new one ---------------- */
+function authCard(inner) {
+  $('#app').innerHTML = `<div class="auth"><section class="auth-art"><div class="brand"><span class="logo">${ico('leaf')}</span>Murimi Farm ERP</div>
+    <div><h1>Run your farm in USD and ZiG, even offline.</h1></div><p class="small" style="opacity:.8">Part of Murimi Intelligent Hub</p></section>
+    <section class="auth-card"><div class="panel">${inner}</div></section></div>`;
+}
+function renderForgot(login = '') {
+  const fields = [{ key: 'login', label: 'WhatsApp number or username', required: true, wide: true, autocomplete: 'username' }];
+  authCard(`<h2>Forgot your password?</h2><p class="muted">We'll send a 6-digit code to the WhatsApp number on your account.</p>
+    <form class="grid" novalidate><p class="form-error f wide" hidden style="grid-column:1/-1"></p>${fields.map((f) => fieldHTML(f, login)).join('')}
+      <div class="actions"><button class="btn" type="button" id="back">Back</button><button class="btn primary" type="submit">Send code</button></div></form>`);
+  $('#back').onclick = () => renderAuth('login');
+  const form = $('.auth form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form); btn.disabled = true;
+    try {
+      const d = readForm(form, fields);
+      const r = await API.post('/api/auth/password/forgot/', d);
+      if (r.whatsapp_off) {
+        authCard(`<h2>Ask your farm owner</h2><p>${esc(r.message)}</p>
+          <p class="note">The owner opens <b>Team</b>, finds your name and presses <b>Reset password</b>. They give you a temporary password, and you choose your own the first time you log in.</p>
+          <div class="actions"><button class="btn primary" id="back">Back to log in</button></div>`);
+        $('#back').onclick = () => renderAuth('login');
+        return;
+      }
+      renderResetCode(d.login, r);
+    } catch (ex) { showErrors(form, ex); } finally { btn.disabled = false; }
+  });
+  $('input', form).focus();
+}
+function renderResetCode(login, info) {
+  const fields = [
+    { key: 'code', label: '6-digit code', required: true, wide: true, autocomplete: 'one-time-code', placeholder: '123456' },
+    { key: 'password', label: 'New password', type: 'password', required: true, wide: true, hint: '8 or more characters, not only numbers', autocomplete: 'new-password' },
+  ];
+  authCard(`<h2>Enter the code</h2><p class="muted">${esc(info.message)}</p>
+    ${info.test_code ? `<p class="note warn">Test mode (this computer only): the code is <b class="mono">${esc(info.test_code)}</b></p>` : ''}
+    <form class="grid" novalidate><p class="form-error f wide" hidden style="grid-column:1/-1"></p>${fields.map((f) => fieldHTML(f, '')).join('')}
+      <div class="actions"><button class="btn" type="button" id="resend" disabled>Send again</button><button class="btn primary" type="submit">Save password</button></div></form>`);
+  let left = info.resend_in || 60;
+  const rb = $('#resend');
+  const tick = setInterval(() => { left -= 1; rb.textContent = left > 0 ? `Send again (${left})` : 'Send again'; rb.disabled = left > 0; if (left <= 0) clearInterval(tick); }, 1000);
+  rb.onclick = async () => { try { renderResetCode(login, await API.post('/api/auth/password/forgot/', { login })); } catch (ex) { toast(ex.message); } };
+  const form = $('.auth form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form); btn.disabled = true;
+    try {
+      S.user = (await API.post('/api/auth/password/reset/', { login, ...readForm(form, fields) })).user;
+      clearInterval(tick);
+      await loadOrgs(); window.addEventListener('hashchange', route);
+      location.hash = '#/home'; route(); toast('Password changed');
+    } catch (ex) { showErrors(form, ex); } finally { btn.disabled = false; }
+  });
+  $('input', form).focus();
+}
+function renderMustChange() {
+  const fields = [
+    { key: 'password', label: 'Your new password', type: 'password', required: true, wide: true, hint: '8 or more characters, not only numbers', autocomplete: 'new-password' },
+    { key: 'again', label: 'Type it again', type: 'password', required: true, wide: true, autocomplete: 'new-password' },
+  ];
+  authCard(`<h2>Choose your own password</h2><p class="muted">Hello ${esc(S.user.full_name.split(' ')[0])}. You logged in with a temporary password from your farm owner. Choose one only you know.</p>
+    <form class="grid" novalidate><p class="form-error f wide" hidden style="grid-column:1/-1"></p>${fields.map((f) => fieldHTML(f, '')).join('')}
+      <div class="actions"><button class="btn" type="button" id="out">Log out</button><button class="btn primary" type="submit">Save password</button></div></form>`);
+  $('#out').onclick = logout;
+  const form = $('.auth form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = readForm(form, fields);
+    if (d.password !== d.again) return showErrors(form, new ApiError('The two passwords are different.', 400, { again: "Doesn't match." }));
+    const btn = $('button[type=submit]', form); btn.disabled = true;
+    try {
+      S.user = (await API.patch('/api/auth/me/', { full_name: S.user.full_name, username: S.user.username, email: S.user.email, password: d.password })).user;
+      await loadOrgs(); location.hash = '#/home'; route(); toast('Password saved');
     } catch (ex) { showErrors(form, ex); } finally { btn.disabled = false; }
   });
   $('input', form).focus();
@@ -411,6 +493,7 @@ function renderShell(page) {
 }
 async function route() {
   if (!S.user) return renderAuth();
+  if (S.user.must_change_password) return renderMustChange();
   if (!S.org) return renderNoOrg();
   const page = (location.hash.replace(/^#\/?/, '').split('/')[0]) || 'home';
   const fn = PAGES[page] || PAGES.home;
@@ -694,7 +777,8 @@ PAGES.team = async (el) => {
       <section class="panel"><h2>People</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>WhatsApp</th><th>Role</th><th></th></tr></thead><tbody>
         ${data.results.map((mm) => `<tr><td><b>${esc(mm.full_name)}</b>${mm.user_id === S.user.id ? ' <span class="chip">You</span>' : ''}</td><td class="mono small">${esc(mm.phone)}</td>
           <td>${manage ? `<select data-role="${mm.id}" aria-label="Role for ${esc(mm.full_name)}">${data.roles.map((r) => `<option value="${r.value}"${r.value === mm.role ? ' selected' : ''}>${r.label}</option>`).join('')}</select>` : esc(mm.role_label)}</td>
-          <td>${manage && mm.user_id !== S.user.id ? `<div class="row-actions"><button class="btn small danger" data-remove="${mm.id}" aria-label="Remove">${ico('x')}</button></div>` : ''}</td></tr>`).join('')}
+          <td>${manage && mm.user_id !== S.user.id ? `<div class="row-actions">${mm.role !== 'owner' ? `<button class="btn small" data-reset="${mm.id}">Reset password</button>` : ''}<button class="btn small danger" data-remove="${mm.id}" aria-label="Remove">${ico('x')}</button></div>` : ''}
+            ${mm.must_change_password ? '<div class="small muted">Will choose a new password at next log-in</div>' : ''}</td></tr>`).join('')}
       </tbody></table></div></section>
       <section class="panel"><h2>What each role can do</h2><div class="table-wrap"><table><tbody>
         ${data.roles.map((r) => `<tr><td><b>${r.label}</b></td><td class="small muted">${roleHelp[r.value]}</td></tr>`).join('')}</tbody></table></div></section>
@@ -719,6 +803,16 @@ PAGES.team = async (el) => {
   el.querySelectorAll('[data-role]').forEach((s) => s.onchange = async () => {
     try { await API.patch(O(`members/${s.dataset.role}/`), { role: s.value }); toast('Role changed'); }
     catch (ex) { toast(ex.message); route(); }
+  });
+  el.querySelectorAll('[data-reset]').forEach((b) => b.onclick = () => {
+    const mm = data.results.find((x) => x.id === b.dataset.reset);
+    confirmBox(`Give <b>${esc(mm.full_name)}</b> a temporary password? Their old password stops working, and they choose a new one when they log in.`, 'Reset password', async () => {
+      const r = await API.post(O(`members/${mm.id}/reset-password/`), {});
+      setTimeout(() => infoBox(`<h2>Temporary password</h2><p>Give this to <b>${esc(mm.full_name)}</b> in person or by phone. It is shown only once.</p>
+        <p class="temp-pass mono">${esc(r.temporary_password)}</p>
+        <p class="note">They log in with their WhatsApp number (<span class="mono">${esc(mm.phone)}</span>) and this password, then choose their own.</p>`), 50);
+      route();
+    });
   });
   el.querySelectorAll('[data-remove]').forEach((b) => b.onclick = () => confirmBox('Remove this person from the business? They keep their Murimi account.', 'Remove',
     async () => { await API.del(O(`members/${b.dataset.remove}/`)); toast('Removed'); route(); }));

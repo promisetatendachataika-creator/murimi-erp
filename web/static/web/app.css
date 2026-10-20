@@ -301,3 +301,5 @@ tr.tot td { font-weight: 800; border-top: 1px solid var(--line); }
 .install > div { display: grid; gap: 8px; align-content: start; padding: 14px; border-radius: 14px; background: var(--surface-2); }
 .install h3 { margin: 0; display: flex; gap: 8px; align-items: center; font-size: 1rem; }
 @media (max-width: 900px) { .install { grid-template-columns: 1fr; } }
+.center { text-align: center; }
+.temp-pass { font-size: 1.6rem; font-weight: 700; text-align: center; padding: 14px; border-radius: 14px; background: var(--green-soft); color: var(--green-deep); letter-spacing: .02em; user-select: all; }

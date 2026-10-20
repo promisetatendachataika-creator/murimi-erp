@@ -122,7 +122,44 @@ def summary(request, m):
 def member_dict(mm):
     return {"id": str(mm.id), "user_id": mm.user_id, "full_name": mm.user.full_name, "phone": mm.user.phone,
             "username": mm.user.username or "", "role": mm.role, "role_label": mm.get_role_display(),
-            "is_active": mm.is_active}
+            "is_active": mm.is_active, "must_change_password": mm.user.must_change_password}
+
+
+WORDS = ["maize", "tobacco", "cotton", "wheat", "soya", "sorghum", "millet", "tractor", "harvest", "rain", "river",
+         "field", "seed", "barn", "dam", "kraal", "plough", "baobab", "msasa", "sunset", "valley", "granite", "zebra"]
+
+
+def temporary_password():
+    """Easy to read out over the phone, e.g. "msasa-river-47". The person must change it when they log in."""
+    import secrets
+    return f"{secrets.choice(WORDS)}-{secrets.choice(WORDS)}-{secrets.randbelow(90) + 10}"
+
+
+@require_http_methods(["POST"])
+@org_view
+def member_reset_password(request, m, pk):
+    """The owner sets a temporary password for someone in the team who forgot theirs."""
+    org = m.organisation
+    if not allowed(m, "manage_members"):
+        return error("Only the owner can reset passwords.", status=403)
+    mm = Membership.objects.filter(organisation=org, pk=clean.uuid_value(pk), is_active=True).select_related("user").first()
+    if mm is None:
+        return error("We couldn't find that person.", status=404)
+    u = mm.user
+    if u.pk == request.user.pk:
+        return error("To change your own password, use My account.", status=409)
+    if mm.role == Membership.OWNER or u.is_staff:
+        return error("Owners and Murimi staff can't have their password reset by someone else.", status=409)
+    if Membership.objects.filter(user=u, is_active=True).exclude(organisation=org).exists():
+        # They also work for another business: one owner must not be able to take over that account.
+        return error(f"{u.full_name} also belongs to another farm business, so you can't reset their password. "
+                     "They can use \"Forgot password?\" on the login page.", status=409)
+    password = temporary_password()
+    u.set_password(password)
+    u.must_change_password = True
+    u.save(update_fields=["password", "must_change_password"])
+    audit.record(request, org, "update", mm, f"Reset {u.full_name}'s password (temporary password given)")
+    return JsonResponse({"temporary_password": password, "member": member_dict(mm)})
 
 
 def other_owners(org, exclude):
