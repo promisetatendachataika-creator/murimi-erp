@@ -303,3 +303,5 @@ tr.tot td { font-weight: 800; border-top: 1px solid var(--line); }
 @media (max-width: 900px) { .install { grid-template-columns: 1fr; } }
 .center { text-align: center; }
 .temp-pass { font-size: 1.6rem; font-weight: 700; text-align: center; padding: 14px; border-radius: 14px; background: var(--green-soft); color: var(--green-deep); letter-spacing: .02em; user-select: all; }
+.invite-note { display: flex; gap: 10px; align-items: flex-start; background: var(--green-soft); color: var(--green-deep); font-weight: 600; }
+.invite-link { word-break: break-all; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); font-size: .85rem; user-select: all; }

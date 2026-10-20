@@ -264,14 +264,16 @@ function confirmBox(message, yesLabel, onYes) {
 /* ---------------- start-up ---------------- */
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+function bindRoute() { if (!bindRoute.done) { window.addEventListener('hashchange', route); bindRoute.done = true; } }
 async function boot() {
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
   Sync.refresh().then(() => Sync.flush());
   try { await API.get('/api/health/'); } catch (e) { /* the cookie is still set by the page */ }
   try { S.user = (await API.get('/api/auth/me/')).user; } catch (e) { S.user = null; }
+  bindRoute();
+  if (/^#\/join\//.test(location.hash)) { if (S.user) await loadOrgs(); return route(); }
   if (!S.user) return renderAuth();
   await loadOrgs();
-  window.addEventListener('hashchange', route);
   route();
 }
 async function loadOrgs() {
@@ -307,6 +309,7 @@ function renderAuth(mode = 'login') {
       <p class="small" style="opacity:.8">Part of Murimi Intelligent Hub</p></section>
     <section class="auth-card"><div class="panel">
       <div class="tabs" role="tablist"><button role="tab" aria-selected="${mode === 'login'}" data-mode="login">Log in</button><button role="tab" aria-selected="${mode === 'signup'}" data-mode="signup">Create account</button></div>
+      ${S.invite ? `<p class="note invite-note">${ico('users')}<span>You're invited to join <b>${esc(S.invite.organisation)}</b> as <b>${esc(S.invite.role_label)}</b>. ${mode === 'login' ? 'Log in' : 'Create your account'} to accept.</span></p>` : ''}
       <h2>${mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
       <form class="grid" novalidate><p class="form-error f wide" hidden style="grid-column:1/-1"></p>${fields.map((f) => fieldHTML(f, '')).join('')}
         <div class="actions"><button class="btn primary" type="submit" style="width:100%;justify-content:center">${mode === 'login' ? 'Log in' : 'Create account'}</button></div></form>
@@ -321,8 +324,9 @@ function renderAuth(mode = 'login') {
     try {
       const data = readForm(form, fields);
       S.user = (await API.post(mode === 'login' ? '/api/auth/login/' : '/api/auth/register/', data)).user;
+      if (S.invite) return acceptInvite(S.invite.token);
       await loadOrgs();
-      window.addEventListener('hashchange', route);
+      bindRoute();
       location.hash = '#/home'; route();
     } catch (ex) { showErrors(form, ex); } finally { btn.disabled = false; }
   });
@@ -380,7 +384,7 @@ function renderResetCode(login, info) {
     try {
       S.user = (await API.post('/api/auth/password/reset/', { login, ...readForm(form, fields) })).user;
       clearInterval(tick);
-      await loadOrgs(); window.addEventListener('hashchange', route);
+      await loadOrgs(); bindRoute();
       location.hash = '#/home'; route(); toast('Password changed');
     } catch (ex) { showErrors(form, ex); } finally { btn.disabled = false; }
   });
@@ -407,6 +411,56 @@ function renderMustChange() {
     } catch (ex) { showErrors(form, ex); } finally { btn.disabled = false; }
   });
   $('input', form).focus();
+}
+
+/* ---------------- invite links ---------------- */
+async function renderJoin(token) {
+  let info;
+  try { info = await API.get(`/api/erp/invites/${token}/`); }
+  catch (ex) {
+    authCard(`<h2>Invite link</h2><p class="form-error">${esc(ex.message)}</p><p class="muted">Ask the owner of the farm business to send you a new link.</p>
+      <div class="actions"><button class="btn primary" id="go">${S.user ? 'Open Murimi' : 'Go to log in'}</button></div>`);
+    $('#go').onclick = () => { S.invite = null; location.hash = '#/home'; };
+    return;
+  }
+  S.invite = { ...info, token };
+  if (!S.user) return renderAuth('signup');
+  authCard(`<h2>Join ${esc(info.organisation)}</h2>
+    <p>${info.invited_by ? `<b>${esc(info.invited_by)}</b> invited you` : 'You are invited'} to join <b>${esc(info.organisation)}</b> on Murimi Farm ERP as <b>${esc(info.role_label)}</b>.</p>
+    <p class="muted small">You're logged in as ${esc(S.user.full_name)} (${esc(S.user.phone)}). Not you? Log out and open the link again.</p>
+    <p class="form-error" hidden></p>
+    <div class="actions"><button class="btn" id="no">Not now</button><button class="btn primary" id="yes">Join ${esc(info.organisation)}</button></div>`);
+  $('#no').onclick = () => { S.invite = null; location.hash = '#/home'; };
+  $('#yes').onclick = () => acceptInvite(token);
+}
+async function acceptInvite(token) {
+  try {
+    const r = await API.post(`/api/erp/invites/${token}/accept/`, {});
+    S.invite = null;
+    await loadOrgs();
+    S.org = S.orgs.find((o) => o.id === r.organisation) || S.org;
+    if (S.org) store.set('murimi-erp-org', S.org.id);
+    location.hash = '#/home';
+    bindRoute();
+    await route();
+    toast(r.already ? `You're already in ${S.org ? S.org.name : 'this business'}` : `Welcome! You joined as ${r.role_label}`);
+  } catch (ex) {
+    S.invite = null;
+    authCard(`<h2>Couldn't join</h2><p class="form-error">${esc(ex.message)}</p><div class="actions"><button class="btn primary" id="go">Open Murimi</button></div>`);
+    $('#go').onclick = async () => { await loadOrgs(); location.hash = '#/home'; route(); };
+  }
+}
+function shareInvite(inv, orgName) {
+  const text = `You're invited to join ${orgName} on Murimi Farm ERP as ${inv.role_label}. Open this link to create your account or log in: ${inv.link}`;
+  infoBox(`<h2>Invite link ready</h2><p>Send this to <b>${esc(inv.name || 'the person')}</b>. It works once, for 7 days, and makes them <b>${esc(inv.role_label)}</b>.</p>
+    <p class="invite-link mono">${esc(inv.link)}</p>
+    <div class="actions" style="justify-content:flex-start;flex-wrap:wrap">
+      <a class="btn primary" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(text)}">Send on WhatsApp</a>
+      <button class="btn" id="copy-inv">Copy link</button></div>`);
+  $('#copy-inv').onclick = async () => {
+    try { await navigator.clipboard.writeText(inv.link); toast('Link copied'); }
+    catch (e) { const r = document.createRange(); r.selectNodeContents($('.invite-link')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Select and copy the link'); }
+  };
 }
 
 /* ---------------- first organisation ---------------- */
@@ -437,7 +491,7 @@ function renderNoOrg() {
   $('#app').innerHTML = `<div class="auth-card" style="min-height:100vh"><div class="panel" style="max-width:520px">
     <div class="brand"><span class="logo">${ico('leaf')}</span>Murimi Farm ERP</div>
     <h1>Welcome, ${esc(S.user.full_name.split(' ')[0])}</h1>
-    <p class="muted">Start by adding your farm business. If someone already uses Murimi Farm ERP for your farm, ask the owner to add you with your WhatsApp number (${esc(S.user.phone)}).</p>
+    <p class="muted">Start by adding your farm business. If your farm already uses Murimi Farm ERP, ask the owner for an <b>invite link</b>, or to add you with your WhatsApp number (${esc(S.user.phone)}).</p>
     <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="first-org">${ico('plus')}Set up my farm business</button><button class="btn" id="lo">${ico('logout')}Log out</button></div>
   </div></div>`;
   $('#first-org').onclick = () => newOrgForm(true);
@@ -492,6 +546,8 @@ function renderShell(page) {
   $('#theme').onclick = () => { setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); route(); };
 }
 async function route() {
+  const jm = location.hash.match(/^#\/join\/([\w-]+)/);
+  if (jm) return renderJoin(jm[1]);
   if (!S.user) return renderAuth();
   if (S.user.must_change_password) return renderMustChange();
   if (!S.org) return renderNoOrg();
@@ -767,12 +823,15 @@ PAGES.rates = async (el) => {
 
 /* team */
 PAGES.team = async (el) => {
-  const [data, org] = await Promise.all([API.get(O('members/')), API.get(O())]);
   const manage = can('manage_members');
+  const [data, org, inv] = await Promise.all([API.get(O('members/')), API.get(O()), manage ? API.get(O('invites/')) : Promise.resolve({ results: [] })]);
+  const openInv = inv.results.filter((i) => i.status === 'open');
   const roleHelp = { owner: 'Everything, including the team and approving pay runs', manager: 'Farms, seasons, rates, workers and pay runs', accountant: 'Rates, workers, pay runs (and approving them), pay rules; sees history',
     storekeeper: 'Items, stores, receiving stock, stock takes and fuel', supervisor: 'Records stock, fuel and who worked in the field; never sees wages', viewer: 'Can look, cannot change' };
   el.innerHTML = `${head('Team', 'Add the people who work with you and choose what each can do. They log in with their own WhatsApp number and password.',
-    manage ? `<button class="btn primary" id="add-member">${ico('plus')}Add a person</button>` : '')}
+    manage ? `<button class="btn primary" id="invite">${ico('users')}Invite someone</button><button class="btn" id="add-member">${ico('plus')}Add by number</button>` : '')}
+    ${openInv.length ? `<section class="panel"><h2>Invites waiting</h2><div class="table-wrap"><table><tbody>${openInv.map((i) => `<tr><td><b>${esc(i.name || 'Someone')}</b><div class="small muted">as ${esc(i.role_label)} · expires ${fmtDate(i.expires_at.slice(0, 10))}</div></td>
+      <td><div class="row-actions"><button class="btn small" data-share="${i.id}">Share link</button><button class="btn small danger" data-cancel-inv="${i.id}">Cancel</button></div></td></tr>`).join('')}</tbody></table></div></section>` : ''}
     <div class="grid2">
       <section class="panel"><h2>People</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>WhatsApp</th><th>Role</th><th></th></tr></thead><tbody>
         ${data.results.map((mm) => `<tr><td><b>${esc(mm.full_name)}</b>${mm.user_id === S.user.id ? ' <span class="chip">You</span>' : ''}</td><td class="mono small">${esc(mm.phone)}</td>
@@ -793,8 +852,18 @@ PAGES.team = async (el) => {
   if (can('edit_organisation')) $('#edit-org').onclick = () => openForm({ title: 'Business details', fields: orgFields(), values: org,
     onSubmit: async (d) => { const o = await API.patch(O(), d); Object.assign(S.org, o); S.orgs = S.orgs.map((x) => x.id === o.id ? { ...x, ...o } : x); toast('Saved'); route(); } });
   if (!manage) return;
+  $('#invite').onclick = () => openForm({
+    title: 'Invite someone', intro: 'You get a link to send by WhatsApp. They open it, create their account (or log in) and join with the role you choose. The link works once, for 7 days.',
+    fields: [{ key: 'name', label: 'Who is it for?', wide: true, placeholder: 'e.g. Sipho, the new supervisor' },
+      { key: 'role', label: 'Role', type: 'select', required: true, wide: true, options: data.roles.filter((r) => r.value !== 'owner').map((r) => [r.value, `${r.label}: ${roleHelp[r.value]}`]) }],
+    values: { role: 'supervisor' }, submitLabel: 'Make link',
+    onSubmit: async (d) => { const i = await API.post(O('invites/'), d); route(); setTimeout(() => shareInvite(i, org.name), 80); },
+  });
+  el.querySelectorAll('[data-share]').forEach((b) => b.onclick = () => shareInvite(openInv.find((i) => i.id === b.dataset.share), org.name));
+  el.querySelectorAll('[data-cancel-inv]').forEach((b) => b.onclick = () => confirmBox('Cancel this invite? The link will stop working.', 'Cancel invite',
+    async () => { await API.del(O(`invites/${b.dataset.cancelInv}/`)); toast('Invite cancelled'); route(); }));
   $('#add-member').onclick = () => openForm({
-    title: 'Add a person', intro: 'They need a Murimi account first. Ask them to sign up on this page with their WhatsApp number, then add them here.',
+    title: 'Add by number', intro: 'For someone who already has a Murimi account. Otherwise, use Invite someone.',
     fields: [{ key: 'login', label: 'Their WhatsApp number or username', required: true, wide: true },
       { key: 'role', label: 'Role', type: 'select', required: true, wide: true, options: data.roles.map((r) => [r.value, `${r.label}: ${roleHelp[r.value]}`]) }],
     values: { role: 'viewer' }, submitLabel: 'Add person',

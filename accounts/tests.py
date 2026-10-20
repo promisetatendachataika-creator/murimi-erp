@@ -73,3 +73,16 @@ class PasswordResetTests(TestCase):
             r = self.client.post("/api/auth/password/forgot/", {"login": "0779999999"}, content_type="application/json")
         self.assertTrue(r.json()["sent"])
         self.assertNotIn("test_code", r.json())
+
+
+class ResetCommandTests(TestCase):
+    def test_command_gives_temporary_password(self):
+        import io
+        from django.core.management import call_command
+        u = make_user("0772000005", "Tendai Owner", username="tendai")
+        out = io.StringIO()
+        call_command("reset_password", "tendai", stdout=out)
+        temp = [l for l in out.getvalue().splitlines() if "Temporary password" in l][0].split(":")[1].strip()
+        u.refresh_from_db()
+        self.assertTrue(u.check_password(temp))
+        self.assertTrue(u.must_change_password)

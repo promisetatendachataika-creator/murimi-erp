@@ -187,3 +187,48 @@ class OwnerResetTests(Base):
         o2.post("/api/erp/orgs/", {"name": "Another Farm", "province": "Mashonaland East", "district": "Marondera"})
         r = self.api.post(self.base + f"members/{mid}/reset-password/", {})
         self.assertEqual(r.status_code, 409)
+
+
+class InviteTests(Base):
+    def test_invite_link_lets_a_new_person_join_once(self):
+        r = self.api.post(self.base + "invites/", {"role": "supervisor", "name": "Sipho"})
+        self.assertEqual(r.status_code, 201, r.content)
+        token = r.json()["link"].split("/join/")[1]
+        anon = ApiClient()
+        info = anon.get(f"/api/erp/invites/{token}/").json()
+        self.assertEqual((info["organisation"], info["role_label"]), ("Moyo Family Farms", "Field supervisor"))
+        self.assertEqual(anon.post(f"/api/erp/invites/{token}/accept/", {}).status_code, 401)
+        sipho = ApiClient(make_user("0772100001", "Sipho Ndlovu"))
+        r = sipho.post(f"/api/erp/invites/{token}/accept/", {})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(Membership.objects.get(user__full_name="Sipho Ndlovu").role, "supervisor")
+        other = ApiClient(make_user("0772100002", "Someone Else"))
+        self.assertEqual(other.post(f"/api/erp/invites/{token}/accept/", {}).status_code, 404)  # used up
+        self.assertEqual(other.get(f"/api/erp/invites/{token}/").status_code, 404)
+
+    def test_cancel_expire_and_permissions(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import Invite
+        inv = self.api.post(self.base + "invites/", {"role": "viewer"}).json()
+        token = inv["link"].split("/join/")[1]
+        self.api.delete(self.base + f"invites/{inv['id']}/")
+        joiner = ApiClient(make_user("0772100003", "Late Joiner"))
+        self.assertEqual(joiner.post(f"/api/erp/invites/{token}/accept/", {}).status_code, 404)
+        inv2 = self.api.post(self.base + "invites/", {"role": "viewer"}).json()
+        Invite.objects.filter(pk=inv2["id"]).update(expires_at=timezone.now() - timedelta(minutes=1))
+        self.assertEqual(joiner.post(f"/api/erp/invites/{inv2['link'].split('/join/')[1]}/accept/", {}).status_code, 404)
+        self.assertEqual(self.api.post(self.base + "invites/", {"role": "owner"}).status_code, 400)  # no owner invites
+        sup = make_user("0772100004", "Sup")
+        self.api.post(self.base + "members/", {"login": "0772100004", "role": "supervisor"})
+        self.assertEqual(ApiClient(sup).post(self.base + "invites/", {"role": "viewer"}).status_code, 403)
+
+
+class PhoneRuleTests(Base):
+    def test_every_way_of_typing_a_zimbabwe_number_logs_in(self):
+        make_user("+263 0782573320", "Typed With Both")
+        from accounts.models import User
+        self.assertEqual(User.objects.get(full_name="Typed With Both").phone, "+263782573320")
+        for typed in ("0782573320", "+263782573320", "+263 078 257 3320", "782573320", "263782573320"):
+            r = ApiClient().post("/api/auth/login/", {"login": typed, "password": "harvest-time-2026"})
+            self.assertEqual(r.status_code, 200, typed)

@@ -12,7 +12,7 @@ from django.views.decorators.http import require_http_methods
 from accounts.backends import find_user
 from murimi_common import clean
 from murimi_common.choices import CROPS, CURRENCY_CODES, PROVINCES
-from murimi_common.http import body, error, login_required_json
+from murimi_common.http import body, client_ip, error, login_required_json, too_many
 
 from . import audit
 from .models import AuditEvent, CropPlan, Farm, Field, Membership, Organisation, Season
@@ -422,3 +422,113 @@ def lists(request):
         "season_statuses": [{"value": v, "label": l} for v, l in Season.STATUS_CHOICES],
         "plan_statuses": [{"value": v, "label": l} for v, l in CropPlan.STATUS_CHOICES],
     })
+
+
+# ---------------------------------------------------------------- invite links
+INVITE_DAYS = 7
+
+
+def invite_dict(inv, now, request=None):
+    d = {"id": str(inv.id), "role": inv.role, "role_label": inv.get_role_display(), "name": inv.name,
+         "created_at": inv.created_at.isoformat(), "expires_at": inv.expires_at.isoformat(),
+         "status": inv.status(now), "used_by": inv.used_by.full_name if inv.used_by_id else "",
+         "by": inv.created_by.full_name if inv.created_by_id else ""}
+    if request is not None and d["status"] == "open":
+        d["link"] = request.build_absolute_uri(f"/#/join/{inv.token}")
+    return d
+
+
+@require_http_methods(["GET", "POST"])
+@org_view
+def invites(request, m):
+    from django.utils import timezone
+    from .models import Invite
+    org, now = m.organisation, timezone.now()
+    if not allowed(m, "manage_members"):
+        return error("Only the owner can invite people.", status=403)
+    if request.method == "GET":
+        qs = Invite.objects.filter(organisation=org).select_related("used_by", "created_by")[:50]
+        return JsonResponse({"results": [invite_dict(i, now, request) for i in qs]})
+    data, errors = body(request), {}
+    role = clean.choice(data, "role", errors, [r for r, _ in Membership.ROLE_CHOICES if r != Membership.OWNER])
+    name = clean.text(data, "name", errors, max_len=120)
+    if errors:
+        return error("Please fix the highlighted fields.", errors=errors)
+    import secrets
+    from datetime import timedelta
+    inv = Invite.objects.create(organisation=org, token=secrets.token_urlsafe(24), role=role, name=name,
+                                created_by=request.user, expires_at=now + timedelta(days=INVITE_DAYS))
+    audit.record(request, org, "create", inv, f"Made an invite link for {name or 'someone'} as {inv.get_role_display()}")
+    return JsonResponse(invite_dict(inv, now, request), status=201)
+
+
+@require_http_methods(["DELETE"])
+@org_view
+def invite_cancel(request, m, pk):
+    from django.utils import timezone
+    from .models import Invite
+    if not allowed(m, "manage_members"):
+        return error("Only the owner can cancel invites.", status=403)
+    inv = Invite.objects.filter(organisation=m.organisation, pk=clean.uuid_value(pk)).first() if clean.uuid_value(pk) else None
+    if inv is None:
+        return error("We couldn't find that invite.", status=404)
+    if not inv.used_at and not inv.cancelled_at:
+        inv.cancelled_at = timezone.now()
+        inv.save(update_fields=["cancelled_at"])
+        audit.record(request, m.organisation, "update", inv, f"Cancelled the invite for {inv.name or 'someone'}")
+    return JsonResponse({"ok": True})
+
+
+def _open_invite(token):
+    from django.utils import timezone
+    from .models import Invite
+    inv = Invite.objects.filter(token=str(token)[:64]).select_related("organisation", "created_by").first()
+    if inv is None or not inv.organisation.is_active:
+        return None, "This invite link isn't valid. Ask for a new one."
+    st = inv.status(timezone.now())
+    if st != "open":
+        return None, {"used": "This invite link has already been used. Ask for a new one.",
+                      "expired": "This invite link has expired. Ask for a new one.",
+                      "cancelled": "This invite link was cancelled. Ask for a new one."}[st]
+    return inv, None
+
+
+@require_http_methods(["GET"])
+def invite_info(request, token):
+    """Anyone with the link may see which business invited them (no login needed)."""
+    if too_many(f"invite:{client_ip(request)}", limit=60, window_seconds=3600):
+        return error("Too many tries. Please wait a while.", status=429)
+    inv, problem = _open_invite(token)
+    if problem:
+        return error(problem, status=404)
+    return JsonResponse({"organisation": inv.organisation.name, "role": inv.role, "role_label": inv.get_role_display(),
+                         "name": inv.name, "invited_by": inv.created_by.full_name if inv.created_by_id else "",
+                         "expires_at": inv.expires_at.isoformat()})
+
+
+@require_http_methods(["POST"])
+@login_required_json
+def invite_accept(request, token):
+    from django.db import transaction
+    from django.utils import timezone
+    from .models import Invite
+    with transaction.atomic():
+        inv, problem = _open_invite(token)
+        if problem:
+            return error(problem, status=404)
+        inv = Invite.objects.select_for_update().get(pk=inv.pk)
+        if inv.used_at:
+            return error("This invite link has already been used. Ask for a new one.", status=404)
+        org = inv.organisation
+        mm, created = Membership.objects.get_or_create(organisation=org, user=request.user, defaults={"role": inv.role})
+        if not created and not mm.is_active:
+            mm.is_active, mm.role = True, inv.role
+            mm.save(update_fields=["is_active", "role"])
+        elif not created:
+            # Already in the business: the invite is not used up, and their role is not changed.
+            return JsonResponse({"organisation": str(org.id), "already": True, "role_label": mm.get_role_display()})
+        inv.used_by, inv.used_at = request.user, timezone.now()
+        inv.save(update_fields=["used_by", "used_at"])
+        audit.record(request, org, "create", mm, f"{request.user.full_name} joined with an invite link as {mm.get_role_display()}",
+                     {"role": mm.role})
+    return JsonResponse({"organisation": str(org.id), "already": False, "role_label": mm.get_role_display()}, status=201)

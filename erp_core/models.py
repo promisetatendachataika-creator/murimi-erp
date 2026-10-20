@@ -197,3 +197,35 @@ class AuditEvent(models.Model):
 
     def __str__(self):
         return f"{self.at:%Y-%m-%d %H:%M} {self.summary}"
+
+
+class Invite(models.Model):
+    """A link the owner sends (e.g. by WhatsApp) so someone can join this business with a set role.
+
+    The link carries a long random token. It works once, for 7 days, and the owner can cancel it.
+    Whoever opens it signs up or logs in, and joins with the role chosen by the owner.
+    """
+    id = uuid_pk()
+    organisation = models.ForeignKey(Organisation, on_delete=models.CASCADE, related_name="invites")
+    token = models.CharField(max_length=64, unique=True)
+    role = models.CharField(max_length=12, choices=Membership.ROLE_CHOICES)
+    name = models.CharField("Who it's for", max_length=120, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                related_name="+")
+    used_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def status(self, now):
+        if self.cancelled_at:
+            return "cancelled"
+        if self.used_at:
+            return "used"
+        if self.expires_at <= now:
+            return "expired"
+        return "open"
