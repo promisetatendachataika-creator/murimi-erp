@@ -57,7 +57,7 @@ form.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
 
 /* ---------- log in ---------- */
 .auth { min-height: 100vh; display: grid; grid-template-columns: 1.1fr 1fr; }
-.auth-art { background: linear-gradient(160deg, #24480f, #3f7d20 55%, #a8c94e); color: #fff; padding: 48px; display: grid; align-content: space-between; }
+.auth-art { background: linear-gradient(180deg, rgba(12,32,6,.66), rgba(12,32,6,.30) 42%, rgba(12,32,6,.78)), url('photos/login.jpg') center/cover no-repeat, #24480f; color: #fff; padding: 48px; display: grid; align-content: space-between; text-shadow: 0 1px 10px rgba(0,0,0,.45); }
 .auth-art h1 { font-size: clamp(2rem, 4vw, 3.2rem); max-width: 14ch; }
 .auth-art ul { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 10px; }
 .auth-art li { display: flex; gap: 10px; align-items: center; opacity: .95; }
@@ -150,7 +150,7 @@ td .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
 }
 @media (max-width: 820px) {
   .auth { grid-template-columns: 1fr; }
-  .auth-art { padding: 28px 20px; }
+  .auth-art { padding: 28px 20px; background-image: linear-gradient(180deg, rgba(12,32,6,.60), rgba(12,32,6,.80)), url('photos/login-small.jpg'); }
   .auth-art ul { display: none; }
   .shell { grid-template-columns: 1fr; }
   .side { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; flex-direction: row; align-items: center; flex-wrap: wrap; }

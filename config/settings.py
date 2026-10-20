@@ -169,7 +169,7 @@ USE_I18N = True
 USE_TZ = True
 
 # Bump this whenever app.js / app.css change, so browsers and installed phone apps fetch the new files.
-MURIMI_ASSET_VERSION = "10"
+MURIMI_ASSET_VERSION = "11"
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
