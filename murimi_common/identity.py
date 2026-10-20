@@ -29,6 +29,8 @@ def normalize_phone(raw):
             digits = "263" + digits  # 77 123 4567 typed without the 0
     if digits.startswith("2630"):
         digits = "263" + digits[4:]  # +263 077... : the 0 is dropped after the country code
+    if digits.startswith("0"):
+        raise ValidationError("Start with 0 and the number, e.g. 077 123 4567, or use +263.")
     if digits.startswith("263") and len(digits) != 12:
         raise ValidationError("A Zimbabwe number has 10 digits, e.g. 077 123 4567 or +263 77 123 4567.")
     if not (9 <= len(digits) <= 15):

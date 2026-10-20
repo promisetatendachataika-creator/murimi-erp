@@ -266,7 +266,18 @@ let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
 function bindRoute() { if (!bindRoute.done) { window.addEventListener('hashchange', route); bindRoute.done = true; } }
 async function boot() {
-  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    // The phone keeps a copy of the app so it opens with no network. When Murimi has been updated,
+    // the new copy takes over: load it straight away, so nobody sees yesterday's version.
+    const hadOne = !!navigator.serviceWorker.controller, opened = Date.now();
+    navigator.serviceWorker.register('/sw.js').then((reg) => reg.update()).catch(() => {});
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadOne || boot.reloaded) return;
+      boot.reloaded = true;
+      if (Date.now() - opened < 15000) location.reload();
+      else toast('Murimi has been updated. Close and open it again to use the new version.', true);
+    });
+  }
   Sync.refresh().then(() => Sync.flush());
   try { await API.get('/api/health/'); } catch (e) { /* the cookie is still set by the page */ }
   try { S.user = (await API.get('/api/auth/me/')).user; } catch (e) { S.user = null; }
